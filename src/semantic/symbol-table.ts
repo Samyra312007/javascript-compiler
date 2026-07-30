@@ -27,7 +27,9 @@ export interface Symbol {
   declaredAt: number;
   isInitialized: boolean;
   isUsed: boolean;
+  isConst?: boolean;
   binding?: number;
+  returnType?: DataType;
 }
 
 export class Scope {

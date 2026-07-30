@@ -116,8 +116,9 @@ export class Parser {
   }
 
   private parseFunctionDeclaration(async: boolean = false): FunctionDeclaration {
+    const generator = this.match(TokenType.Star);
     const name = this.parseIdentifier();
-    return this.parseFunctionBody(name, async, false);
+    return this.parseFunctionBody(name, async, generator);
   }
 
   private parseFunctionBody(name: Identifier, async: boolean, generator: boolean): FunctionDeclaration {
@@ -962,6 +963,21 @@ export class Parser {
     if (this.match(TokenType.LeftParen)) {
       const savedPos = this.current;
 
+      // Empty arrow params: () => ...
+      if (this.check(TokenType.RightParen) && this.checkNext(TokenType.Arrow)) {
+        this.advance();
+        this.advance();
+        let body: Expression | BlockStatement;
+        let expression = true;
+        if (this.check(TokenType.LeftBrace)) {
+          body = this.parseBlockStatementInternal();
+          expression = false;
+        } else {
+          body = this.parseExpression();
+        }
+        return { type: 'ArrowFunctionExpression', params: [], body: body as any, expression, async: false };
+      }
+
       // Try to parse as arrow function params
       if (!this.check(TokenType.RightParen) && this.canBeArrowParams()) {
         const params = this.parseArrowFunctionParams();
@@ -1128,9 +1144,9 @@ export class Parser {
           continue;
         }
         if (this.match(TokenType.DotDotDot)) {
-          elements.push({ type: 'SpreadElement', argument: this.parseExpression() });
+          elements.push({ type: 'SpreadElement', argument: this.parseAssignment() });
         } else {
-          elements.push(this.parseExpression());
+          elements.push(this.parseAssignment());
         }
       } while (this.match(TokenType.Comma));
       if (this.check(TokenType.Comma)) {

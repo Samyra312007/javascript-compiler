@@ -10,6 +10,8 @@ export class XSMGenerator {
   private symbolTable: any;
   private tempToRegister: Map<string, number> = new Map();
   private labelCounter: number = 0;
+  private variableAddressMap: Map<string, number> = new Map();
+  private nextVariableAddress: number = 4050;
 
   constructor(symbolTable: any) {
     this.symbolTable = symbolTable;
@@ -29,8 +31,9 @@ export class XSMGenerator {
     for (const inst of instructions) {
       if (inst.op === TACOp.LABEL && inst.label !== undefined) {
         this.labels.set(inst.label, address);
+      } else {
+        address += 2;
       }
-      address += 2;
     }
   }
 
@@ -134,11 +137,11 @@ export class XSMGenerator {
   private generateNot(inst: TACInstruction): void {
     const reg = this.getRegister(inst.arg1 || 'false');
     const resultReg = this.allocateRegister();
-    this.emit(`MOV R${resultReg}, 0`);
-    this.emit(`CMP R${reg}, 0`);
-    this.emit(`JZ R${reg}, L${this.getLabelForComparison()}`);
+    const jumpTarget = this.currentAddress + 4;
     this.emit(`MOV R${resultReg}, 1`);
-    this.emit(`LABEL L${this.getLabelForComparison()}:`);
+    this.emit(`CMP R${reg}, 0`);
+    this.emit(`JZ ${jumpTarget}`);
+    this.emit(`MOV R${resultReg}, 0`);
     this.freeRegister(reg);
     if (inst.result && inst.result.startsWith('t')) {
       this.mapTempToRegister(inst.result, resultReg);
@@ -295,9 +298,7 @@ export class XSMGenerator {
   }
 
   private generateLabel(inst: TACInstruction): void {
-    if (inst.label !== undefined) {
-      this.emit(`L${inst.label}:`);
-    }
+    // labels are resolved to numeric addresses in firstPass; no code emitted
   }
 
   private generateJump(inst: TACInstruction): void {
@@ -332,24 +333,25 @@ export class XSMGenerator {
     const reg2 = this.getRegister(inst.arg2!);
     const resultReg = this.allocateRegister();
 
+    // Invert condition: jump to skip 'set to 1' when condition is FALSE
     let condition: string;
     switch (inst.op) {
       case TACOp.EQ:
-      case TACOp.STRICT_EQ: condition = 'EQ'; break;
+      case TACOp.STRICT_EQ: condition = 'NE'; break;
       case TACOp.NE:
-      case TACOp.STRICT_NE: condition = 'NE'; break;
-      case TACOp.LT: condition = 'LT'; break;
-      case TACOp.GT: condition = 'GT'; break;
-      case TACOp.LE: condition = 'LE'; break;
-      case TACOp.GE: condition = 'GE'; break;
-      default: condition = 'EQ';
+      case TACOp.STRICT_NE: condition = 'EQ'; break;
+      case TACOp.LT: condition = 'GE'; break;
+      case TACOp.GT: condition = 'LE'; break;
+      case TACOp.LE: condition = 'GT'; break;
+      case TACOp.GE: condition = 'LT'; break;
+      default: condition = 'NE';
     }
 
+    const jumpTarget = this.currentAddress + 4;
     this.emit(`MOV R${resultReg}, 0`);
     this.emit(`CMP R${reg1}, R${reg2}`);
-    this.emit(`J${condition} L${this.getLabelForComparison()}`);
+    this.emit(`J${condition} ${jumpTarget}`);
     this.emit(`MOV R${resultReg}, 1`);
-    this.emit(`LABEL L${this.getLabelForComparison()}:`);
 
     this.freeRegister(reg1);
     this.freeRegister(reg2);
@@ -357,6 +359,15 @@ export class XSMGenerator {
   }
 
   private generateBitwise(inst: TACInstruction): void {
+    if (inst.op === TACOp.BIT_NOT) {
+      const reg1 = this.getRegister(inst.arg1!);
+      const resultReg = this.allocateRegister();
+      this.emit(`MOV R${resultReg}, R${reg1}`);
+      this.emit(`NOT R${resultReg}`);
+      this.freeRegister(reg1);
+      this.storeResult(inst, resultReg);
+      return;
+    }
     const reg1 = this.getRegister(inst.arg1!);
     const reg2 = this.getRegister(inst.arg2!);
     const resultReg = this.allocateRegister();
@@ -374,10 +385,6 @@ export class XSMGenerator {
         this.emit(`MOV R${resultReg}, R${reg1}`);
         this.emit(`XOR R${resultReg}, R${reg2}`);
         break;
-      case TACOp.BIT_NOT:
-        this.emit(`MOV R${resultReg}, R${reg1}`);
-        this.emit(`NOT R${resultReg}`);
-        break;
       case TACOp.SHL:
         this.emit(`MOV R${resultReg}, R${reg1}`);
         this.emit(`SHL R${resultReg}, R${reg2}`);
@@ -390,6 +397,11 @@ export class XSMGenerator {
         this.emit(`MOV R${resultReg}, R${reg1}`);
         this.emit(`SHR R${resultReg}, R${reg2}`);
         break;
+      default:
+        this.freeRegister(reg1);
+        this.freeRegister(reg2);
+        this.freeRegister(resultReg);
+        return;
     }
 
     this.freeRegister(reg1);
@@ -465,11 +477,10 @@ export class XSMGenerator {
         return symbol.binding;
       }
     }
-    return 4096 + (name.charCodeAt(0) - 97);
-  }
-
-  private getLabelForComparison(): number {
-    return this.labelCounter++;
+    if (!this.variableAddressMap.has(name)) {
+      this.variableAddressMap.set(name, this.nextVariableAddress--);
+    }
+    return this.variableAddressMap.get(name)!;
   }
 
   private emit(code: string): void {
