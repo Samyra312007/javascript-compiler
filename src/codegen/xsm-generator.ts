@@ -12,6 +12,7 @@ export class XSMGenerator {
   private labelCounter: number = 0;
   private variableAddressMap: Map<string, number> = new Map();
   private nextVariableAddress: number = 4050;
+  private functionStackOffsets: Map<string, number> = new Map();
 
   constructor(symbolTable: any) {
     this.symbolTable = symbolTable;
@@ -66,7 +67,7 @@ export class XSMGenerator {
       case TACOp.INC: this.generateInc(inst); break;
       case TACOp.DEC: this.generateDec(inst); break;
       case TACOp.TYPEOF: this.generateTypeof(inst); break;
-      case TACOp.DELETE: break;
+      case TACOp.DELETE: this.emit('MOV R0, 1'); break;
       case TACOp.SPREAD: break;
       case TACOp.STRICT_EQ:
       case TACOp.STRICT_NE:
@@ -94,13 +95,44 @@ export class XSMGenerator {
       this.emit(`MOV R0, R${argReg}`);
       this.emit(`CALL print`);
       this.freeRegister(argReg);
+    } else if (inst.arg1 === 'string_new' || inst.arg1 === 'object_new' ||
+               inst.arg1 === 'array_new' || inst.arg1 === 'string_concat' ||
+               inst.arg1 === 'typeof_runtime') {
+      this.emit(`CALL ${inst.arg1}`);
+      if (inst.result) {
+        const reg = this.allocateRegister();
+        this.emit(`MOV R${reg}, R0`);
+        this.storeResult(inst, reg);
+      }
     } else {
       this.emit(`CALL ${inst.arg1}`);
     }
   }
 
   private generateNew(inst: TACInstruction): void {
-    this.emit(`CALL ${inst.arg1}_new`);
+    const typeName = inst.arg1;
+    if (typeName === 'Array') {
+      this.emit('CALL array_new');
+      if (inst.result) {
+        const reg = this.allocateRegister();
+        this.emit(`MOV R${reg}, R0`);
+        this.storeResult(inst, reg);
+      }
+    } else if (typeName === 'String') {
+      this.emit('CALL string_new');
+      if (inst.result) {
+        const reg = this.allocateRegister();
+        this.emit(`MOV R${reg}, R0`);
+        this.storeResult(inst, reg);
+      }
+    } else {
+      this.emit('CALL object_new');
+      if (inst.result) {
+        const reg = this.allocateRegister();
+        this.emit(`MOV R${reg}, R0`);
+        this.storeResult(inst, reg);
+      }
+    }
   }
 
   private generateStore(inst: TACInstruction): void {
@@ -108,7 +140,16 @@ export class XSMGenerator {
     const parts = (inst.result || '').split('.');
     if (parts.length === 2) {
       const objReg = this.getRegister(parts[0]);
-      this.emit(`MOV [R${objReg}], R${valReg}`);
+      const idxStr = parts[1];
+      if (!isNaN(Number(idxStr))) {
+        this.emit(`MOV R1, ${idxStr}`);
+      } else {
+        const idxAddr = this.getVariableAddress(idxStr);
+        this.emit(`MOV R1, [${idxAddr}]`);
+      }
+      this.emit(`MOV R2, R${valReg}`);
+      this.emit(`MOV R0, R${objReg}`);
+      this.emit(`CALL object_set`);
       this.freeRegister(objReg);
     }
     this.freeRegister(valReg);
@@ -119,8 +160,21 @@ export class XSMGenerator {
     const parts = (inst.arg1 || '').split('.');
     if (parts.length === 2) {
       const objReg = this.getRegister(parts[0]);
-      this.emit(`MOV R${reg}, [R${objReg}]`);
+      const idxStr = parts[1];
+      if (!isNaN(Number(idxStr))) {
+        this.emit(`MOV R1, ${idxStr}`);
+      } else {
+        const idxAddr = this.getVariableAddress(idxStr);
+        this.emit(`MOV R1, [${idxAddr}]`);
+      }
+      this.emit(`MOV R0, R${objReg}`);
+      this.emit(`CALL object_get`);
+      this.emit(`MOV R${reg}, R0`);
       this.freeRegister(objReg);
+    } else if (inst.arg1 && (inst.arg1.startsWith('"') || inst.arg1.startsWith("'"))) {
+      const strVal = inst.arg1.replace(/^["']|["']$/g, '');
+      this.emit(`MOV R${reg}, ${strVal.length}`);
+      this.emit(`ADD R${reg}, 5000`);
     } else {
       const address = this.getVariableAddress(inst.arg1 || '');
       this.emit(`MOV R${reg}, [${address}]`);
@@ -143,13 +197,7 @@ export class XSMGenerator {
     this.emit(`JZ ${jumpTarget}`);
     this.emit(`MOV R${resultReg}, 0`);
     this.freeRegister(reg);
-    if (inst.result && inst.result.startsWith('t')) {
-      this.mapTempToRegister(inst.result, resultReg);
-    } else if (inst.result) {
-      const address = this.getVariableAddress(inst.result);
-      this.emit(`MOV [${address}], R${resultReg}`);
-      this.freeRegister(resultReg);
-    }
+    this.storeResult(inst, resultReg);
   }
 
   private generateNeg(inst: TACInstruction): void {
@@ -158,13 +206,7 @@ export class XSMGenerator {
     this.emit(`MOV R${resultReg}, 0`);
     this.emit(`SUB R${resultReg}, R${reg}`);
     this.freeRegister(reg);
-    if (inst.result && inst.result.startsWith('t')) {
-      this.mapTempToRegister(inst.result, resultReg);
-    } else if (inst.result) {
-      const address = this.getVariableAddress(inst.result);
-      this.emit(`MOV [${address}], R${resultReg}`);
-      this.freeRegister(resultReg);
-    }
+    this.storeResult(inst, resultReg);
   }
 
   private generateInc(inst: TACInstruction): void {
@@ -179,16 +221,12 @@ export class XSMGenerator {
 
   private generateTypeof(inst: TACInstruction): void {
     const reg = this.getRegister(inst.arg1 || 'undefined');
+    this.emit(`MOV R0, R${reg}`);
+    this.emit(`CALL typeof_runtime`);
     const resultReg = this.allocateRegister();
-    this.emit(`MOV R${resultReg}, R${reg}`);
+    this.emit(`MOV R${resultReg}, R0`);
     this.freeRegister(reg);
-    if (inst.result && inst.result.startsWith('t')) {
-      this.mapTempToRegister(inst.result, resultReg);
-    } else if (inst.result) {
-      const address = this.getVariableAddress(inst.result);
-      this.emit(`MOV [${address}], R${resultReg}`);
-      this.freeRegister(resultReg);
-    }
+    this.storeResult(inst, resultReg);
   }
 
   private generateMod(inst: TACInstruction): void {
@@ -199,13 +237,7 @@ export class XSMGenerator {
     this.emit(`MOD R${resultReg}, R${reg2}`);
     this.freeRegister(reg1);
     this.freeRegister(reg2);
-    if (inst.result && inst.result.startsWith('t')) {
-      this.mapTempToRegister(inst.result, resultReg);
-    } else if (inst.result) {
-      const address = this.getVariableAddress(inst.result);
-      this.emit(`MOV [${address}], R${resultReg}`);
-      this.freeRegister(resultReg);
-    }
+    this.storeResult(inst, resultReg);
   }
 
   private generatePow(inst: TACInstruction): void {
@@ -218,13 +250,7 @@ export class XSMGenerator {
     this.emit(`POP R${resultReg}`);
     this.freeRegister(reg1);
     this.freeRegister(reg2);
-    if (inst.result && inst.result.startsWith('t')) {
-      this.mapTempToRegister(inst.result, resultReg);
-    } else if (inst.result) {
-      const address = this.getVariableAddress(inst.result);
-      this.emit(`MOV [${address}], R${resultReg}`);
-      this.freeRegister(resultReg);
-    }
+    this.storeResult(inst, resultReg);
   }
 
   private generateParam(inst: TACInstruction): void {
@@ -333,7 +359,6 @@ export class XSMGenerator {
     const reg2 = this.getRegister(inst.arg2!);
     const resultReg = this.allocateRegister();
 
-    // Invert condition: jump to skip 'set to 1' when condition is FALSE
     let condition: string;
     switch (inst.op) {
       case TACOp.EQ:

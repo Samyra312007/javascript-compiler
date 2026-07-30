@@ -6,6 +6,9 @@ import { TypeChecker } from './semantic/type-checker.js';
 import { TACGenerator } from './ir/tac.js';
 import { XSMGenerator } from './codegen/xsm-generator.js';
 import { XEXEWriter } from './codegen/xexe-writer.js';
+import { X86Generator } from './codegen/x86-generator.js';
+import { X86Writer } from './codegen/x86-writer.js';
+import { XSMRuntime } from './codegen/xsm-runtime.js';
 
 export interface CompilerOptions {
   inputFile: string;
@@ -71,23 +74,64 @@ export class Compiler {
       }
       
       if (this.options.debug) console.log('Phase 5: Code Generation...');
-      const xsmGen = new XSMGenerator(typeChecker.getSymbolTable());
-      const xsmCode = xsmGen.generate(tac);
       
-      if (this.options.debug) console.log('Phase 6: Writing Output...');
-      const outputFile = this.options.outputFile || 
-        path.basename(this.options.inputFile, '.js') + '.xexe';
-      
-      const writer = new XEXEWriter();
-      writer.addCodeLines(xsmCode.split('\n'));
-      writer.writeToFile(outputFile);
-      
-      console.log(`Compilation successful! Output written to ${outputFile}`);
-      return true;
+      if (this.options.target === 'x86') {
+        return this.generateX86(tac, typeChecker);
+      } else {
+        return this.generateXSM(tac, typeChecker);
+      }
       
     } catch (error) {
       console.error('Compilation failed:', error);
       return false;
     }
+  }
+
+  private generateXSM(tac: any[], typeChecker: TypeChecker): boolean {
+    const xsmGen = new XSMGenerator(typeChecker.getSymbolTable());
+    const xsmCode = xsmGen.generate(tac);
+    
+    if (this.options.debug) console.log('Phase 6: Writing Output...');
+    const outputFile = this.options.outputFile || 
+      path.basename(this.options.inputFile, '.js') + '.xexe';
+    
+    const runtimeInit = XSMRuntime.getRuntimeInit();
+    const allLines = [...runtimeInit, ...xsmCode.split('\n')];
+    
+    const writer = new XEXEWriter();
+    writer.addCodeLines(allLines);
+    writer.writeToFile(outputFile);
+    
+    console.log(`Compilation successful! Output written to ${outputFile}`);
+    return true;
+  }
+
+  private generateX86(tac: any[], typeChecker: TypeChecker): boolean {
+    const x86Gen = new X86Generator(typeChecker.getSymbolTable());
+    const asmCode = x86Gen.generate(tac);
+    
+    if (this.options.debug) console.log('Phase 6: Writing Output...');
+    const baseName = path.basename(this.options.inputFile, '.js');
+    const asmFile = this.options.outputFile || baseName + '.s';
+    const objFile = baseName + '.o';
+    const exeFile = baseName;
+    
+    const writer = new X86Writer();
+    writer.addCodeLines(asmCode.split('\n'));
+    writer.setRuntimeStubs(x86Gen.getRuntimeStubs());
+    writer.writeToFile(asmFile);
+    
+    console.log(`Assembly written to ${asmFile}`);
+    
+    if (this.options.target === 'x86') {
+      if (writer.assemble(asmFile, objFile)) {
+        if (writer.link(objFile, exeFile)) {
+          console.log(`Executable written to ${exeFile}`);
+          try { fs.unlinkSync(objFile); } catch {}
+        }
+      }
+    }
+    
+    return true;
   }
 }
