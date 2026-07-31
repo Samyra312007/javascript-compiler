@@ -12,7 +12,7 @@ import {
   ClassDeclaration, ClassBody, MethodDefinition,
   ImportDeclaration, ImportSpecifier,
   ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportNamedSpecifier,
-  ExportNamedDeclaration, ExportDefaultDeclaration, ExportSpecifier,
+  ExportNamedDeclaration, ExportDefaultDeclaration, ExportAllDeclaration, ExportSpecifier,
   BinaryExpression, UnaryExpression, UpdateExpression,
   AssignmentExpression, LogicalExpression, ConditionalExpression,
   ChainExpression,
@@ -79,7 +79,13 @@ export class Parser {
     if (this.match(TokenType.Return)) return this.parseReturnStatement();
     if (this.match(TokenType.Break)) return this.parseBreakStatement();
     if (this.match(TokenType.Continue)) return this.parseContinueStatement();
-    if (this.match(TokenType.Import)) return this.parseImportDeclaration();
+    if (this.check(TokenType.Import)) {
+      if (this.checkNext(TokenType.LeftParen)) {
+        return this.parseExpressionStatement();
+      }
+      this.advance();
+      return this.parseImportDeclaration();
+    }
     if (this.match(TokenType.Export)) return this.parseExportDeclaration();
 
     if (this.check(TokenType.Identifier) && this.checkNext(TokenType.Colon)) {
@@ -118,6 +124,17 @@ export class Parser {
   private parseFunctionDeclaration(async: boolean = false): FunctionDeclaration {
     const generator = this.match(TokenType.Star);
     const name = this.parseIdentifier();
+    return this.parseFunctionBody(name, async, generator);
+  }
+
+  private parseDefaultFunctionDeclaration(async: boolean): FunctionDeclaration {
+    const generator = this.match(TokenType.Star);
+    let name: Identifier;
+    if (this.check(TokenType.Identifier)) {
+      name = this.parseIdentifier();
+    } else {
+      name = { type: 'Identifier', name: '__anon_default' };
+    }
     return this.parseFunctionBody(name, async, generator);
   }
 
@@ -425,8 +442,13 @@ export class Parser {
       if (this.match(TokenType.Static)) isStatic = true;
 
       let kind: 'method' | 'get' | 'set' | 'constructor' = 'method';
-      if (this.match(TokenType.Get)) kind = 'get';
-      else if (this.match(TokenType.Set)) kind = 'set';
+      if (this.check(TokenType.Get) && !this.checkNext(TokenType.LeftParen)) {
+        this.advance();
+        kind = 'get';
+      } else if (this.check(TokenType.Set) && !this.checkNext(TokenType.LeftParen)) {
+        this.advance();
+        kind = 'set';
+      }
 
       let key: Expression;
       let computed = false;
@@ -455,11 +477,6 @@ export class Parser {
 
   private parseImportDeclaration(): ImportDeclaration | null {
     let specifiers: ImportSpecifier[] = [];
-
-    if (this.match(TokenType.LeftParen)) {
-      this.current--;
-      return null;
-    }
 
     if (this.check(TokenType.String)) {
       const source = this.parseLiteral() as Literal;
@@ -507,17 +524,24 @@ export class Parser {
     if (this.match(TokenType.Default)) {
       let declaration: Statement | Expression;
       if (this.match(TokenType.Function)) {
-        declaration = this.parseFunctionDeclaration();
+        declaration = this.parseDefaultFunctionDeclaration(false);
       } else if (this.match(TokenType.Class)) {
         declaration = this.parseClassDeclaration();
       } else if (this.match(TokenType.Async) && this.check(TokenType.Function)) {
         this.advance();
-        declaration = this.parseFunctionDeclaration(true);
+        declaration = this.parseDefaultFunctionDeclaration(true);
       } else {
         declaration = this.parseExpression();
         this.match(TokenType.Semicolon);
       }
       return { type: 'ExportDefaultDeclaration', declaration };
+    }
+
+    if (this.match(TokenType.Star)) {
+      this.consume(TokenType.From, "Expected 'from' after *");
+      const source: Literal = { type: 'Literal', value: this.consume(TokenType.String, "Expected module source").literal as string };
+      this.match(TokenType.Semicolon);
+      return { type: 'ExportAllDeclaration', source };
     }
 
     if (this.match(TokenType.LeftBrace)) {

@@ -9,6 +9,7 @@ import { XEXEWriter } from './codegen/xexe-writer.js';
 import { X86Generator } from './codegen/x86-generator.js';
 import { X86Writer } from './codegen/x86-writer.js';
 import { XSMRuntime } from './codegen/xsm-runtime.js';
+import { bundle, hasModuleSyntax, BundleResult } from './modules/bundler.js';
 
 export interface CompilerOptions {
   inputFile: string;
@@ -18,6 +19,7 @@ export interface CompilerOptions {
   debug: boolean;
   dumpAst?: boolean;
   dumpTac?: boolean;
+  module?: boolean;
 }
 
 export class Compiler {
@@ -45,7 +47,20 @@ export class Compiler {
       
       if (this.options.debug) console.log('Phase 2: Syntax Analysis...');
       const parser = new Parser(tokens);
-      const ast = parser.parse();
+      let ast = parser.parse();
+      
+      let bundled = false;
+      if (this.options.module || hasModuleSyntax(ast)) {
+        if (this.options.debug) console.log('Detected module syntax; bundling...');
+        const bundleResult = bundle(this.options.inputFile);
+        if (!bundleResult.program) {
+          console.error('Module bundling failed:');
+          bundleResult.errors.forEach(err => console.error(`  ${err}`));
+          return false;
+        }
+        ast = bundleResult.program;
+        bundled = true;
+      }
       
       if (this.options.debug && this.options.dumpAst) {
         console.log('AST:');

@@ -33,6 +33,7 @@ export type Statement =
   | ImportDeclaration
   | ExportNamedDeclaration
   | ExportDefaultDeclaration
+  | ExportAllDeclaration
   | LabeledStatement;
 
 export interface VariableDeclaration {
@@ -235,6 +236,11 @@ export interface ExportNamedDeclaration {
 export interface ExportDefaultDeclaration {
   type: 'ExportDefaultDeclaration';
   declaration: Statement | Expression;
+}
+
+export interface ExportAllDeclaration {
+  type: 'ExportAllDeclaration';
+  source: Literal;
 }
 
 export interface ExportSpecifier {

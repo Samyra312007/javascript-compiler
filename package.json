@@ -15,7 +15,8 @@
     "test:ast": "node dist/cli.js test.js --dump-ast",
     "test:tac": "node dist/cli.js test.js --dump-tac",
     "prepublishOnly": "npm run build",
-    "test:file": "ts-node tests/runner.ts"
+    "test:file": "ts-node tests/runner.ts",
+    "test:modules": "npm run build && ts-node tests/modules/run-tests.ts"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

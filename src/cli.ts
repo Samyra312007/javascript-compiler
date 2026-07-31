@@ -20,6 +20,7 @@ program
   .option('--debug', 'Enable debug output', false)
   .option('--dump-ast', 'Dump AST to console', false)
   .option('--dump-tac', 'Dump TAC to console', false)
+  .option('--module', 'Force module bundling (auto-detected otherwise)', false)
   .action((inputFile, options) => {
     
     if (!fs.existsSync(inputFile)) {
@@ -34,7 +35,8 @@ program
       optimizations: options.optimizations,
       debug: options.debug,
       dumpAst: options.dumpAst,
-      dumpTac: options.dumpTac
+      dumpTac: options.dumpTac,
+      module: options.module
     };
     
     const compiler = new Compiler(compilerOptions);

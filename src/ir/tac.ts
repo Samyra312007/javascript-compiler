@@ -169,6 +169,7 @@ export class TACGenerator {
       case 'ImportDeclaration':
       case 'ExportNamedDeclaration':
       case 'ExportDefaultDeclaration':
+      case 'ExportAllDeclaration':
         return null;
       default:
         return null;

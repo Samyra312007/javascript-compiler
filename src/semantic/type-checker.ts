@@ -98,6 +98,8 @@ export class TypeChecker {
       case 'ExportDefaultDeclaration':
         this.visitExportDefaultDeclaration(node as any);
         break;
+      case 'ExportAllDeclaration':
+        break;
       default:
         break;
     }
