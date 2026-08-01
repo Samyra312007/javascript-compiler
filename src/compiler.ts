@@ -10,6 +10,8 @@ import { X86Generator } from './codegen/x86-generator.js';
 import { X86Writer } from './codegen/x86-writer.js';
 import { XSMRuntime } from './codegen/xsm-runtime.js';
 import { bundle, hasModuleSyntax, BundleResult } from './modules/bundler.js';
+import { optimizeTAC } from './optimizer/index.js';
+import { applyPeephole } from './codegen/peephole.js';
 
 export interface CompilerOptions {
   inputFile: string;
@@ -81,7 +83,14 @@ export class Compiler {
       
       if (this.options.debug) console.log('Phase 4: IR Generation...');
       const tacGen = new TACGenerator();
-      const tac = tacGen.generate(ast);
+      let tac = tacGen.generate(ast);
+      
+      if (this.options.optimizations) {
+        if (this.options.debug) console.log(`Phase 4b: Optimizing TAC (${tac.length} instructions)...`);
+        const optimized = optimizeTAC(tac);
+        if (this.options.debug) console.log(`Phase 4b: Optimization complete (${optimized.length} instructions, removed ${tac.length - optimized.length})`);
+        tac = optimized;
+      }
       
       if (this.options.debug && this.options.dumpTac) {
         console.log('TAC:');
@@ -104,7 +113,10 @@ export class Compiler {
 
   private generateXSM(tac: any[], typeChecker: TypeChecker): boolean {
     const xsmGen = new XSMGenerator(typeChecker.getSymbolTable());
-    const xsmCode = xsmGen.generate(tac);
+    let xsmCode = xsmGen.generate(tac);
+    if (this.options.optimizations) {
+      xsmCode = applyPeephole(xsmCode.split('\n')).join('\n');
+    }
     
     if (this.options.debug) console.log('Phase 6: Writing Output...');
     const outputFile = this.options.outputFile || 
@@ -123,7 +135,10 @@ export class Compiler {
 
   private generateX86(tac: any[], typeChecker: TypeChecker): boolean {
     const x86Gen = new X86Generator(typeChecker.getSymbolTable());
-    const asmCode = x86Gen.generate(tac);
+    let asmCode = x86Gen.generate(tac);
+    if (this.options.optimizations) {
+      asmCode = applyPeephole(asmCode.split('\n')).join('\n');
+    }
     
     if (this.options.debug) console.log('Phase 6: Writing Output...');
     const baseName = path.basename(this.options.inputFile, '.js');

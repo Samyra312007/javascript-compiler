@@ -64,7 +64,8 @@ export class Parser {
       return this.parseVariableDeclaration();
     }
     if (this.match(TokenType.Function)) return this.parseFunctionDeclaration();
-    if (this.match(TokenType.Async) && this.check(TokenType.Function)) {
+    if (this.check(TokenType.Async) && this.checkNext(TokenType.Function)) {
+      this.advance();
       this.advance();
       return this.parseFunctionDeclaration(true);
     }
@@ -527,7 +528,8 @@ export class Parser {
         declaration = this.parseDefaultFunctionDeclaration(false);
       } else if (this.match(TokenType.Class)) {
         declaration = this.parseClassDeclaration();
-      } else if (this.match(TokenType.Async) && this.check(TokenType.Function)) {
+      } else if (this.check(TokenType.Async) && this.checkNext(TokenType.Function)) {
+        this.advance();
         this.advance();
         declaration = this.parseDefaultFunctionDeclaration(true);
       } else {
@@ -922,7 +924,7 @@ export class Parser {
     if (this.match(TokenType.Function)) return this.parseFunctionExpression();
     if (this.match(TokenType.Class)) return this.parseClassExpression();
     if (this.match(TokenType.New)) return this.parseNewExpression();
-    if (this.match(TokenType.Import) && this.check(TokenType.LeftParen)) {
+    if (this.check(TokenType.Import) && this.checkNext(TokenType.LeftParen)) {
       this.advance();
       this.consume(TokenType.LeftParen, "Expected '(' after import");
       const source = this.parseExpression();
@@ -968,7 +970,8 @@ export class Parser {
         return { type: 'ArrowFunctionExpression', params: [{ type: 'FunctionParam', param: id, default: null, rest: false }], body: body as any, expression, async: false };
       }
 
-      if (this.match(TokenType.Equals) && this.check(TokenType.GreaterThan)) {
+      if (this.check(TokenType.Equals) && this.checkNext(TokenType.GreaterThan)) {
+        this.advance();
         this.advance();
         let body: Expression | BlockStatement;
         let expression = true;
