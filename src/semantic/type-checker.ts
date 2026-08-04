@@ -4,8 +4,10 @@ import { SymbolTable, SymbolKind, DataType } from './symbol-table.js';
 export class TypeChecker {
   private symbolTable: SymbolTable;
   private errors: Array<{ message: string; line: number }> = [];
+  private warnings: Array<{ message: string; line: number }> = [];
   private currentFunction: string | null = null;
   private functionReturnTypes: Map<string, DataType[]> = new Map();
+  private functionEndsWithReturn: Set<string> = new Set();
   private inLoop: number = 0;
   private inSwitch: number = 0;
   private inBlock: boolean = false;
@@ -16,14 +18,25 @@ export class TypeChecker {
 
   public check(ast: Program): boolean {
     this.errors = [];
+    this.warnings = [];
     try {
       this.visitProgram(ast);
+      this.checkWarnings();
     } catch (error) {
       if (error instanceof Error) {
         this.errors.push({ message: error.message, line: 0 });
       }
     }
     return this.errors.length === 0;
+  }
+
+  private checkWarnings(): void {
+    for (const { symbol } of this.symbolTable.getAllSymbolsFlat()) {
+      if (symbol.isUsed) continue;
+      if (symbol.kind === SymbolKind.Builtin) continue;
+      if (symbol.kind === SymbolKind.Function) continue;
+      this.addWarning(`Unused variable '${symbol.name}'`, symbol.declaredAt);
+    }
   }
 
   private visitProgram(node: Program): void {
@@ -239,8 +252,10 @@ export class TypeChecker {
       this.declareFunctionParam(param);
     }
 
+    let lastStmt: any = null;
     for (const stmt of node.body.body) {
       this.visitStatement(stmt);
+      lastStmt = stmt;
     }
 
     const returnTypes = this.functionReturnTypes.get(funcName) || [];
@@ -249,6 +264,9 @@ export class TypeChecker {
       const funcSymbol = this.symbolTable.lookupCurrent(funcName);
       if (funcSymbol) {
         funcSymbol.returnType = inferredReturnType;
+      }
+      if (!lastStmt || lastStmt.type !== 'ReturnStatement') {
+        this.addWarning(`Function '${funcName}' does not always return a value`, 0);
       }
     }
 
@@ -782,8 +800,16 @@ export class TypeChecker {
     this.errors.push({ message, line });
   }
 
+  private addWarning(message: string, line: number): void {
+    this.warnings.push({ message, line });
+  }
+
   public getErrors(): Array<{ message: string; line: number }> {
     return this.errors;
+  }
+
+  public getWarnings(): Array<{ message: string; line: number }> {
+    return this.warnings;
   }
 
   public getSymbolTable(): SymbolTable {

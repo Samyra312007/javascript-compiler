@@ -1,4 +1,5 @@
 import { Token, TokenType } from '../lexer/token.js';
+import { Diagnostic, DiagnosticSeverity } from '../diagnostics.js';
 import {
   Program, Statement, Expression,
   VariableDeclaration, FunctionDeclaration, FunctionParam,
@@ -29,12 +30,25 @@ import {
   Pattern, ArrayPattern, ObjectPattern, AssignmentProperty, AssignmentPattern
 } from '../ast/ast-types.js';
 
+export class ParseException extends Error {
+  constructor(
+    message: string,
+    public readonly line: number,
+    public readonly column: number,
+    public readonly length: number = 1
+  ) {
+    super(message);
+    this.name = 'ParseException';
+  }
+}
+
 export class Parser {
   private tokens: Token[];
   private current: number = 0;
   private templateDepth: number = 0;
+  public diagnostics: Diagnostic[] = [];
 
-  constructor(tokens: Token[]) {
+  constructor(tokens: Token[], private fileName: string = '') {
     this.tokens = tokens;
   }
 
@@ -42,7 +56,7 @@ export class Parser {
     const statements: Statement[] = [];
 
     while (!this.isAtEnd()) {
-      const stmt = this.parseStatement();
+      const stmt = this.parseStatementRecover();
       if (stmt) statements.push(stmt);
     }
 
@@ -51,6 +65,57 @@ export class Parser {
       body: statements,
       sourceFile: ''
     };
+  }
+
+  private parseStatementRecover(): Statement | null {
+    try {
+      return this.parseStatement();
+    } catch (e) {
+      if (e instanceof ParseException) {
+        this.recordDiagnostic(e);
+        this.synchronize();
+        return null;
+      }
+      throw e;
+    }
+  }
+
+  private recordDiagnostic(e: ParseException): void {
+    this.diagnostics.push({
+      severity: DiagnosticSeverity.Error,
+      code: 'syntax',
+      message: e.message,
+      location: { file: this.fileName, line: e.line, column: e.column, length: e.length }
+    });
+  }
+
+  private synchronize(): void {
+    this.advance();
+    while (!this.isAtEnd()) {
+      if (this.previous().type === TokenType.Semicolon) return;
+      switch (this.peek().type) {
+        case TokenType.Class:
+        case TokenType.Function:
+        case TokenType.Let:
+        case TokenType.Const:
+        case TokenType.Var:
+        case TokenType.If:
+        case TokenType.While:
+        case TokenType.Do:
+        case TokenType.For:
+        case TokenType.Return:
+        case TokenType.Break:
+        case TokenType.Continue:
+        case TokenType.Switch:
+        case TokenType.Try:
+        case TokenType.Throw:
+        case TokenType.Import:
+        case TokenType.Export:
+        case TokenType.RightBrace:
+          return;
+      }
+      this.advance();
+    }
   }
 
   // ==================== STATEMENTS ====================
@@ -404,7 +469,7 @@ export class Parser {
     this.consume(TokenType.LeftBrace, "Expected '{' to start block");
     const statements: Statement[] = [];
     while (!this.check(TokenType.RightBrace) && !this.isAtEnd()) {
-      const stmt = this.parseStatement();
+      const stmt = this.parseStatementRecover();
       if (stmt) statements.push(stmt);
     }
     this.consume(TokenType.RightBrace, "Expected '}' after block");
@@ -1536,6 +1601,6 @@ export class Parser {
 
   private error(message: string): Error {
     const token = this.peek();
-    return new Error(`Parser error at ${token.line}:${token.column}: ${message}`);
+    return new ParseException(message, token.line, token.column, Math.max(1, token.lexeme.length));
   }
 }

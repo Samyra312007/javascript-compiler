@@ -209,6 +209,16 @@ export class SymbolTable {
     return this.currentScope;
   }
 
+  public getAllSymbolsFlat(): Array<{ symbol: Symbol; scope: Scope }> {
+    const out: Array<{ symbol: Symbol; scope: Scope }> = [];
+    for (const scope of this.scopes) {
+      for (const symbol of scope.getAllSymbols().values()) {
+        out.push({ symbol, scope });
+      }
+    }
+    return out;
+  }
+
   public printSymbolTable(): void {
     console.log('\nSymbol Table:');
     console.log('='.repeat(50));

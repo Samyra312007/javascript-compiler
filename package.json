@@ -17,7 +17,8 @@
     "prepublishOnly": "npm run build",
     "test:file": "ts-node tests/runner.ts",
     "test:modules": "npm run build && ts-node tests/modules/run-tests.ts",
-    "test:optimizer": "npm run build && node tests/optimizer/run-tests.js"
+    "test:optimizer": "npm run build && node tests/optimizer/run-tests.js",
+    "test:tooling": "npm run build && ts-node tests/tooling/run-tests.ts"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
